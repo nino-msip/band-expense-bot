@@ -11,9 +11,6 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive.file",
 ]
 
-SPREADSHEET_ID = os.environ["GOOGLE_SPREADSHEET_ID"]
-
-
 def _get_client():
     try:
         import streamlit as st
@@ -26,7 +23,6 @@ def _get_client():
 
 def create_expense_report(name: str, address: str, items: list) -> list:
     gc = _get_client()
-    spreadsheet = gc.open_by_key(SPREADSHEET_ID)
     now = datetime.now()
     ts = now.strftime("%Y%m%d_%H%M%S")
 
@@ -36,14 +32,24 @@ def create_expense_report(name: str, address: str, items: list) -> list:
         key = item.get("invoice_number") or "その他"
         groups[key].append(item)
 
+    # 依頼ごとに新規スプレッドシートを作成
+    spreadsheet = gc.create(f"経費精算書_{name}_{ts}")
+    spreadsheet.share("", perm_type="anyone", role="writer")
+
     urls = []
+    first = True
     for invoice_key, group_items in groups.items():
-        sheet_title = f"{name}_{ts}_{invoice_key}"
-        ws = spreadsheet.add_worksheet(title=sheet_title, rows=35, cols=10)
+        if first:
+            ws = spreadsheet.sheet1
+            ws.update_title(invoice_key)
+            ws.resize(rows=35, cols=10)
+            first = False
+        else:
+            ws = spreadsheet.add_worksheet(title=invoice_key, rows=35, cols=10)
         total_row, note_row = _fill_form(ws, name, address, group_items, now)
         _format_sheet(ws, len(group_items), total_row, note_row)
         urls.append(
-            f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit#gid={ws.id}"
+            f"https://docs.google.com/spreadsheets/d/{spreadsheet.id}/edit#gid={ws.id}"
         )
 
     return urls
