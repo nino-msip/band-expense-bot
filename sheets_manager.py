@@ -15,8 +15,12 @@ SPREADSHEET_ID = os.environ["GOOGLE_SPREADSHEET_ID"]
 
 
 def _get_client():
-    creds_json = json.loads(os.environ["GOOGLE_CREDENTIALS_JSON"])
-    creds = Credentials.from_service_account_info(creds_json, scopes=SCOPES)
+    try:
+        import streamlit as st
+        creds_info = dict(st.secrets["gcp_service_account"])
+    except Exception:
+        creds_info = json.loads(os.environ["GOOGLE_CREDENTIALS_JSON"])
+    creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
     return gspread.authorize(creds)
 
 
