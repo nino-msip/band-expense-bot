@@ -5,24 +5,60 @@ from datetime import datetime
 
 import gspread
 from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build as build_service
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/drive",
 ]
 
-def _get_client():
+
+def _get_credentials():
     try:
         import streamlit as st
         creds_info = dict(st.secrets["gcp_service_account"])
     except Exception:
         creds_info = json.loads(os.environ["GOOGLE_CREDENTIALS_JSON"])
-    creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
-    return gspread.authorize(creds)
+    return Credentials.from_service_account_info(creds_info, scopes=SCOPES)
 
 
-def create_expense_report(name: str, address: str, items: list) -> list:
+def _get_client():
+    return gspread.authorize(_get_credentials())
+
+
+def _get_drive():
+    return build_service("drive", "v3", credentials=_get_credentials())
+
+
+def _create_folder(drive, folder_name: str) -> str:
+    folder = drive.files().create(
+        body={"name": folder_name, "mimeType": "application/vnd.google-apps.folder"},
+        fields="id",
+    ).execute()
+    return folder["id"]
+
+
+def _move_to_folder(drive, file_id: str, folder_id: str):
+    file = drive.files().get(fileId=file_id, fields="parents").execute()
+    previous_parents = ",".join(file.get("parents", []))
+    drive.files().update(
+        fileId=file_id,
+        addParents=folder_id,
+        removeParents=previous_parents,
+        fields="id,parents",
+    ).execute()
+
+
+def _share_anyone(drive, file_id: str):
+    drive.permissions().create(
+        fileId=file_id,
+        body={"type": "anyone", "role": "writer"},
+    ).execute()
+
+
+def create_expense_report(name: str, address: str, items: list, folder_name: str = "") -> list:
     gc = _get_client()
+    drive = _get_drive()
     now = datetime.now()
     ts = now.strftime("%Y%m%d_%H%M%S")
 
@@ -32,9 +68,14 @@ def create_expense_report(name: str, address: str, items: list) -> list:
         key = item.get("invoice_number") or "その他"
         groups[key].append(item)
 
-    # 依頼ごとに新規スプレッドシートを作成
+    # フォルダ作成
+    fn = folder_name.strip() or f"経費精算_{name}_{ts}"
+    folder_id = _create_folder(drive, fn)
+    _share_anyone(drive, folder_id)
+
+    # 依頼ごとに新規スプレッドシートを作成してフォルダへ移動
     spreadsheet = gc.create(f"経費精算書_{name}_{ts}")
-    spreadsheet.share("", perm_type="anyone", role="writer")
+    _move_to_folder(drive, spreadsheet.id, folder_id)
 
     urls = []
     first = True

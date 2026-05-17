@@ -23,7 +23,7 @@ if "sheet_urls" not in st.session_state:
 
 # ── ダイアログ：精算書作成して終了 ────────────────────────
 @st.dialog("確認")
-def confirm_create(name, address):
+def confirm_create(name, address, folder_name):
     st.write("終了ですか？")
     st.caption("確認後、インボイス番号ごとにスプレッドシートを作成します。")
     c1, c2 = st.columns(2)
@@ -35,6 +35,7 @@ def confirm_create(name, address):
                         name=name,
                         address=address,
                         items=st.session_state.expense_items,
+                        folder_name=folder_name,
                     )
                     st.session_state.sheet_urls = urls
                     st.session_state.expense_items = []
@@ -80,6 +81,8 @@ member = next(m for m in MEMBERS if m["name"] == selected)
 name = member["name"]
 address = member["address"]
 st.caption(f"住所：{address}")
+
+folder_name = st.text_input("案件名（Driveフォルダ名）", placeholder="例：2026年5月 スタジオ代")
 
 st.divider()
 
@@ -190,7 +193,7 @@ if st.session_state.expense_items:
         st.warning("氏名を入力してください。")
     else:
         if st.button("🚀 精算書を作成して終了", type="primary", use_container_width=True):
-            confirm_create(name, address)
+            confirm_create(name, address, folder_name)
 
 # ── 作成済みリンク表示 ────────────────────────────────────
 if st.session_state.sheet_urls:
