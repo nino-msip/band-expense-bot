@@ -15,8 +15,8 @@ st.set_page_config(
 )
 
 # ── Session state 初期化 ────────────────────────────────────
-if "items" not in st.session_state:
-    st.session_state.items = []
+if "expense_items" not in st.session_state:
+    st.session_state.expense_items = []
 if "sheet_urls" not in st.session_state:
     st.session_state.sheet_urls = []
 
@@ -34,10 +34,10 @@ def confirm_create(name, address):
                     urls = create_expense_report(
                         name=name,
                         address=address,
-                        items=st.session_state.items,
+                        items=st.session_state.expense_items,
                     )
                     st.session_state.sheet_urls = urls
-                    st.session_state.items = []
+                    st.session_state.expense_items = []
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ エラーが発生しました：{e}")
@@ -53,7 +53,7 @@ def confirm_reset():
     c1, c2 = st.columns(2)
     with c1:
         if st.button("はい", type="primary", use_container_width=True):
-            st.session_state.items = []
+            st.session_state.expense_items = []
             st.session_state.sheet_urls = []
             st.rerun()
     with c2:
@@ -113,20 +113,20 @@ if uploaded_files:
             for e in errors:
                 st.error(f"❌ {e.get('_filename', '')}: {e['error']}")
         if ok:
-            st.session_state.items.extend(ok)
+            st.session_state.expense_items.extend(ok)
             st.success(f"✅ {len(ok)}件を読み取りました！内容を確認してください。")
             st.session_state.sheet_urls = []
 
 st.divider()
 
 # ── 読み取り済みリスト（確認・編集）──────────────────────
-if st.session_state.items:
-    st.subheader(f"📝 経費一覧（{len(st.session_state.items)}件）")
+if st.session_state.expense_items:
+    st.subheader(f"📝 経費一覧（{len(st.session_state.expense_items)}件）")
     st.caption("内容を確認・修正してから精算書を作成してください。")
 
     delete_index = None
 
-    for i, item in enumerate(st.session_state.items):
+    for i, item in enumerate(st.session_state.expense_items):
         with st.expander(
             f"#{i+1}　{item.get('date') or '日付不明'}　{item.get('store_name') or '店名不明'}　"
             f"¥{item.get('amount_total', 0):,}",
@@ -166,13 +166,13 @@ if st.session_state.items:
                 delete_index = i
 
     if delete_index is not None:
-        st.session_state.items.pop(delete_index)
+        st.session_state.expense_items.pop(delete_index)
         st.session_state.sheet_urls = []
         st.rerun()
 
     # 合計
-    total_amount = sum(it.get("amount_total") or 0 for it in st.session_state.items)
-    total_tax = sum(it.get("tax_amount") or 0 for it in st.session_state.items)
+    total_amount = sum(it.get("amount_total") or 0 for it in st.session_state.expense_items)
+    total_tax = sum(it.get("tax_amount") or 0 for it in st.session_state.expense_items)
     st.info(f"**合計：¥{total_amount:,}**　（うち消費税：¥{total_tax:,}）")
 
     st.divider()
@@ -201,5 +201,5 @@ if st.session_state.sheet_urls:
         confirm_reset()
 
 # ── 初期表示 ──────────────────────────────────────────────
-elif not st.session_state.items:
+elif not st.session_state.expense_items:
     st.info("上のエリアからレシート・領収書をアップロードしてください。")
