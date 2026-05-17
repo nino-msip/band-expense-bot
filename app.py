@@ -1,0 +1,205 @@
+import os
+
+import streamlit as st
+from dotenv import load_dotenv
+
+from receipt_extractor import extract_receipt_info
+from sheets_manager import create_expense_report
+
+load_dotenv(dotenv_path=".env")
+
+st.set_page_config(
+    page_title="バンド経費精算",
+    page_icon="🎸",
+    layout="centered",
+)
+
+# ── Session state 初期化 ────────────────────────────────────
+if "items" not in st.session_state:
+    st.session_state.items = []
+if "sheet_urls" not in st.session_state:
+    st.session_state.sheet_urls = []
+
+
+# ── ダイアログ：精算書作成して終了 ────────────────────────
+@st.dialog("確認")
+def confirm_create(name, address):
+    st.write("終了ですか？")
+    st.caption("確認後、インボイス番号ごとにスプレッドシートを作成します。")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("はい", type="primary", use_container_width=True):
+            with st.spinner("精算書を作成中..."):
+                try:
+                    urls = create_expense_report(
+                        name=name,
+                        address=address,
+                        items=st.session_state.items,
+                    )
+                    st.session_state.sheet_urls = urls
+                    st.session_state.items = []
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ エラーが発生しました：{e}")
+    with c2:
+        if st.button("いいえ", use_container_width=True):
+            st.rerun()
+
+
+# ── ダイアログ：リセット確認 ──────────────────────────────
+@st.dialog("確認")
+def confirm_reset():
+    st.write("終了ですか？")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("はい", type="primary", use_container_width=True):
+            st.session_state.items = []
+            st.session_state.sheet_urls = []
+            st.rerun()
+    with c2:
+        if st.button("いいえ", use_container_width=True):
+            st.rerun()
+
+
+# ── ヘッダー ──────────────────────────────────────────────
+st.title("🎸 バンド経費精算")
+st.caption("レシート・領収書の写真またはPDFをアップロードして精算書を自動作成します")
+
+st.divider()
+
+# ── 申請者情報 ────────────────────────────────────────────
+st.subheader("📋 申請者情報")
+
+col1, col2 = st.columns([1, 2])
+with col1:
+    name = st.text_input("氏名", placeholder="例：二宮大河")
+with col2:
+    address = st.text_input("住所", placeholder="例：京都府京都市中京区...")
+
+st.divider()
+
+# ── ファイルアップロード ───────────────────────────────────
+st.subheader("📎 レシート・領収書をアップロード")
+st.caption("写真（JPG・PNG）またはPDFに対応。複数まとめて選択できます。")
+
+uploaded_files = st.file_uploader(
+    "ファイルを選択",
+    type=["jpg", "jpeg", "png", "pdf"],
+    accept_multiple_files=True,
+    label_visibility="collapsed",
+)
+
+if uploaded_files:
+    if st.button("📖 読み取り開始", type="primary", use_container_width=True):
+        progress = st.progress(0, text="読み取り中...")
+        new_items = []
+
+        for i, f in enumerate(uploaded_files):
+            progress.progress(
+                (i + 1) / len(uploaded_files),
+                text=f"読み取り中… {f.name} ({i+1}/{len(uploaded_files)})",
+            )
+            raw = f.read()
+            info = extract_receipt_info(raw)
+            info["_filename"] = f.name
+            new_items.append(info)
+
+        progress.empty()
+
+        errors = [it for it in new_items if "error" in it]
+        ok = [it for it in new_items if "error" not in it]
+
+        if errors:
+            for e in errors:
+                st.error(f"❌ {e.get('_filename', '')}: {e['error']}")
+        if ok:
+            st.session_state.items.extend(ok)
+            st.success(f"✅ {len(ok)}件を読み取りました！内容を確認してください。")
+            st.session_state.sheet_urls = []
+
+st.divider()
+
+# ── 読み取り済みリスト（確認・編集）──────────────────────
+if st.session_state.items:
+    st.subheader(f"📝 経費一覧（{len(st.session_state.items)}件）")
+    st.caption("内容を確認・修正してから精算書を作成してください。")
+
+    delete_index = None
+
+    for i, item in enumerate(st.session_state.items):
+        with st.expander(
+            f"#{i+1}　{item.get('date') or '日付不明'}　{item.get('store_name') or '店名不明'}　"
+            f"¥{item.get('amount_total', 0):,}",
+            expanded=False,
+        ):
+            c1, c2 = st.columns(2)
+            with c1:
+                item["date"] = st.text_input("日付", value=item.get("date") or "", key=f"date_{i}")
+                item["store_name"] = st.text_input("店名・支払先", value=item.get("store_name") or "", key=f"store_{i}")
+                item["description"] = st.text_input("内容・用途", value=item.get("description") or "", key=f"desc_{i}")
+            with c2:
+                amount = st.number_input(
+                    "税込金額（円）",
+                    value=int(item.get("amount_total") or 0),
+                    min_value=0,
+                    step=1,
+                    key=f"amount_{i}",
+                )
+                item["amount_total"] = amount
+                default_tax = round(amount * 10 / 110) if amount else 0
+                tax = st.number_input(
+                    "消費税（円）",
+                    value=int(item.get("tax_amount") or default_tax),
+                    min_value=0,
+                    step=1,
+                    key=f"tax_{i}",
+                )
+                item["tax_amount"] = tax
+                item["invoice_number"] = st.text_input(
+                    "インボイス番号（任意）",
+                    value=item.get("invoice_number") or "",
+                    placeholder="T1234567890123",
+                    key=f"invoice_{i}",
+                )
+
+            if st.button("🗑️ この件を削除", key=f"del_{i}"):
+                delete_index = i
+
+    if delete_index is not None:
+        st.session_state.items.pop(delete_index)
+        st.session_state.sheet_urls = []
+        st.rerun()
+
+    # 合計
+    total_amount = sum(it.get("amount_total") or 0 for it in st.session_state.items)
+    total_tax = sum(it.get("tax_amount") or 0 for it in st.session_state.items)
+    st.info(f"**合計：¥{total_amount:,}**　（うち消費税：¥{total_tax:,}）")
+
+    st.divider()
+
+    # 精算書作成ボタン
+    st.subheader("📄 精算書を作成")
+
+    if not name:
+        st.warning("氏名を入力してください。")
+    else:
+        if st.button("🚀 精算書を作成して終了", type="primary", use_container_width=True):
+            confirm_create(name, address)
+
+# ── 作成済みリンク表示 ────────────────────────────────────
+if st.session_state.sheet_urls:
+    n = len(st.session_state.sheet_urls)
+    st.success(f"✅ 精算書が{n}件完成しました！（インボイス番号ごとに分割）")
+    for i, url in enumerate(st.session_state.sheet_urls, 1):
+        st.link_button(
+            f"📊 精算書 {i} を開く",
+            url,
+            use_container_width=True,
+        )
+    st.divider()
+    if st.button("🔄 新しい精算書を作る", use_container_width=True):
+        confirm_reset()
+
+# ── 初期表示 ──────────────────────────────────────────────
+elif not st.session_state.items:
+    st.info("上のエリアからレシート・領収書をアップロードしてください。")
