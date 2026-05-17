@@ -105,9 +105,10 @@ if uploaded_files:
                 text=f"読み取り中… {f.name} ({i+1}/{len(uploaded_files)})",
             )
             raw = f.read()
-            info = extract_receipt_info(raw)
-            info["_filename"] = f.name
-            new_items.append(info)
+            infos = extract_receipt_info(raw)
+            for j, info in enumerate(infos):
+                info["_filename"] = f.name if len(infos) == 1 else f"{f.name} #{j+1}"
+                new_items.append(info)
 
         progress.empty()
 
