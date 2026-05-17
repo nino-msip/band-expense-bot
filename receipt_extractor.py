@@ -1,6 +1,5 @@
 import json
 import os
-import re
 
 import google.generativeai as genai
 
@@ -44,11 +43,13 @@ def extract_receipt_info(raw_bytes: bytes) -> dict:
         response = _get_model().generate_content([part, PROMPT])
         text = response.text.strip()
 
-        json_match = re.search(r"\{[\s\S]*\}", text)
-        if not json_match:
+        start = text.find("{")
+        if start == -1:
             return {"error": "JSONを抽出できませんでした", "raw": text}
-
-        data = json.loads(json_match.group())
+        try:
+            data, _ = json.JSONDecoder().raw_decode(text, start)
+        except json.JSONDecodeError:
+            return {"error": "JSONを抽出できませんでした", "raw": text}
         for field in ("amount_total", "tax_amount"):
             if data.get(field) is not None:
                 try:
