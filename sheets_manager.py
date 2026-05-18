@@ -516,10 +516,10 @@ def _write_xlsx_sheet(ws, name: str, address: str, items: list, now: datetime):
 
     # 氏名・住所ボックス
     ws["H6"].value = "氏名"
-    ws["H6"].alignment = Alignment(horizontal="left", vertical="middle")
+    ws["H6"].alignment = Alignment(horizontal="left", vertical="center")
     _mc(ws, "I6:J6", name, v_align="center")
     ws["H7"].value = "住所"
-    ws["H7"].alignment = Alignment(horizontal="left", vertical="middle")
+    ws["H7"].alignment = Alignment(horizontal="left", vertical="center")
     _mc(ws, "I7:J7", address, v_align="center", wrap=True)
     _apply_outer_border(ws, 6, 7, 8, 10)
 
