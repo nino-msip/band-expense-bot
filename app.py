@@ -4,11 +4,11 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from receipt_extractor import extract_receipt_info
-from sheets_manager import create_expense_report, cleanup_service_account_drive, create_expense_xlsx
+from sheets_manager import create_expense_report, cleanup_service_account_drive, create_expense_xlsx, upload_to_drive
 
 load_dotenv(dotenv_path=".env")
 
-VERSION = "1.0"
+VERSION = "1.1"
 
 st.set_page_config(
     page_title="バンド経費精算",
@@ -25,6 +25,8 @@ if "xlsx_data" not in st.session_state:
     st.session_state.xlsx_data = None
 if "xlsx_filename" not in st.session_state:
     st.session_state.xlsx_filename = ""
+if "drive_url" not in st.session_state:
+    st.session_state.drive_url = ""
 
 
 # ── ダイアログ：精算書作成して終了 ────────────────────────
@@ -47,6 +49,13 @@ def confirm_create(name, address, folder_name):
                     fn = folder_name.strip() or f"経費精算_{name}_{ts}"
                     st.session_state.xlsx_data = xlsx_bytes
                     st.session_state.xlsx_filename = f"{fn}.xlsx"
+                    st.session_state.drive_url = ""
+                    # Driveにもアップロード（失敗してもダウンロードは使える）
+                    try:
+                        drive_url = upload_to_drive(xlsx_bytes, f"{fn}.xlsx", fn)
+                        st.session_state.drive_url = drive_url
+                    except Exception:
+                        pass
                     st.session_state.expense_items = []
                     st.rerun()
                 except Exception as e:
@@ -67,6 +76,7 @@ def confirm_reset():
             st.session_state.sheet_urls = []
             st.session_state.xlsx_data = None
             st.session_state.xlsx_filename = ""
+            st.session_state.drive_url = ""
             st.rerun()
     with c2:
         if st.button("いいえ", use_container_width=True):
@@ -224,13 +234,19 @@ if st.session_state.sheet_urls:
 # ── XLSXダウンロード表示 ──────────────────────────────────
 if st.session_state.xlsx_data:
     st.success("✅ 精算書が完成しました！")
+    if st.session_state.drive_url:
+        st.link_button(
+            "📁 Driveフォルダを開く",
+            st.session_state.drive_url,
+            use_container_width=True,
+            type="primary",
+        )
     st.download_button(
-        label="📥 精算書をダウンロード（Excel）",
+        label="📥 ダウンロード（Excel）",
         data=st.session_state.xlsx_data,
         file_name=st.session_state.xlsx_filename,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
-        type="primary",
     )
     st.divider()
     if st.button("🔄 新しい精算書を作る", key="new_after_xlsx", use_container_width=True):
