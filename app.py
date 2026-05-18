@@ -4,7 +4,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from receipt_extractor import extract_receipt_info
-from sheets_manager import create_expense_report, cleanup_service_account_drive
+from sheets_manager import create_expense_report, cleanup_service_account_drive, create_expense_xlsx
 
 load_dotenv(dotenv_path=".env")
 
@@ -19,25 +19,32 @@ if "expense_items" not in st.session_state:
     st.session_state.expense_items = []
 if "sheet_urls" not in st.session_state:
     st.session_state.sheet_urls = []
+if "xlsx_data" not in st.session_state:
+    st.session_state.xlsx_data = None
+if "xlsx_filename" not in st.session_state:
+    st.session_state.xlsx_filename = ""
 
 
 # ── ダイアログ：精算書作成して終了 ────────────────────────
 @st.dialog("確認")
 def confirm_create(name, address, folder_name):
     st.write("終了ですか？")
-    st.caption("確認後、インボイス番号ごとにスプレッドシートを作成します。")
+    st.caption("確認後、精算書（Excelファイル）を作成してダウンロードします。")
     c1, c2 = st.columns(2)
     with c1:
         if st.button("はい", type="primary", use_container_width=True):
             with st.spinner("精算書を作成中..."):
                 try:
-                    urls = create_expense_report(
+                    from datetime import datetime
+                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    xlsx_bytes = create_expense_xlsx(
                         name=name,
                         address=address,
                         items=st.session_state.expense_items,
-                        folder_name=folder_name,
                     )
-                    st.session_state.sheet_urls = urls
+                    fn = folder_name.strip() or f"経費精算_{name}_{ts}"
+                    st.session_state.xlsx_data = xlsx_bytes
+                    st.session_state.xlsx_filename = f"{fn}.xlsx"
                     st.session_state.expense_items = []
                     st.rerun()
                 except Exception as e:
@@ -56,6 +63,8 @@ def confirm_reset():
         if st.button("はい", type="primary", use_container_width=True):
             st.session_state.expense_items = []
             st.session_state.sheet_urls = []
+            st.session_state.xlsx_data = None
+            st.session_state.xlsx_filename = ""
             st.rerun()
     with c2:
         if st.button("いいえ", use_container_width=True):
@@ -209,8 +218,25 @@ if st.session_state.sheet_urls:
     if st.button("🔄 新しい精算書を作る", use_container_width=True):
         confirm_reset()
 
+# ── XLSXダウンロード表示 ──────────────────────────────────
+if st.session_state.xlsx_data:
+    st.success("✅ 精算書が完成しました！")
+    st.download_button(
+        label="📥 精算書をダウンロード（Excel）",
+        data=st.session_state.xlsx_data,
+        file_name=st.session_state.xlsx_filename,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+        type="primary",
+    )
+    st.divider()
+    if st.button("🔄 新しい精算書を作る", key="new_after_xlsx", use_container_width=True):
+        st.session_state.xlsx_data = None
+        st.session_state.xlsx_filename = ""
+        confirm_reset()
+
 # ── 初期表示 ──────────────────────────────────────────────
-elif not st.session_state.expense_items:
+elif not st.session_state.expense_items and not st.session_state.xlsx_data:
     st.info("上のエリアからレシート・領収書をアップロードしてください。")
 
 # ── 管理：ストレージクリーンアップ ───────────────────────

@@ -1,3 +1,4 @@
+import io
 import os
 import json
 from collections import defaultdict
@@ -6,6 +7,8 @@ from datetime import datetime, timedelta
 import gspread
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build as build_service
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -424,3 +427,150 @@ def _format_sheet(ws, num_items: int, total_row: int, note_row: int):
         ]
 
     sp.batch_update({"requests": requests})
+
+
+# ────────────────────────────────────────────────────────────
+# XLSX生成（Google Drive不使用・クォータ問題なし）
+# ────────────────────────────────────────────────────────────
+
+def _side(style="medium"):
+    return Side(style=style)
+
+def _border(left=None, right=None, top=None, bottom=None):
+    return Border(left=left, right=right, top=top, bottom=bottom)
+
+def _apply_outer_border(ws, min_row, max_row, min_col, max_col):
+    med = _side("medium")
+    thin = _side("thin")
+    for r in range(min_row, max_row + 1):
+        for c in range(min_col, max_col + 1):
+            ws.cell(r, c).border = _border(
+                left=med if c == min_col else thin,
+                right=med if c == max_col else thin,
+                top=med if r == min_row else thin,
+                bottom=med if r == max_row else thin,
+            )
+
+def _mc(ws, cell_range, value=None, bold=False, italic=False, size=11,
+        color=None, bg=None, h_align="left", v_align="center",
+        wrap=False, num_fmt=None, font_color="000000"):
+    ws.merge_cells(cell_range)
+    start = cell_range.split(":")[0]
+    cell = ws[start]
+    if value is not None:
+        cell.value = value
+    cell.font = Font(bold=bold, italic=italic, size=size, color=font_color)
+    cell.alignment = Alignment(horizontal=h_align, vertical=v_align, wrap_text=wrap)
+    if bg:
+        cell.fill = PatternFill("solid", fgColor=bg)
+    if num_fmt:
+        cell.number_format = num_fmt
+    return cell
+
+
+def create_expense_xlsx(name: str, address: str, items: list) -> bytes:
+    now = datetime.now()
+    groups: dict[str, list] = defaultdict(list)
+    for item in items:
+        key = item.get("invoice_number") or "その他"
+        groups[key].append(item)
+
+    wb = Workbook()
+    first = True
+    for invoice_key, group_items in groups.items():
+        if first:
+            ws = wb.active
+            ws.title = invoice_key[:31]
+            first = False
+        else:
+            ws = wb.create_sheet(title=invoice_key[:31])
+        _write_xlsx_sheet(ws, name, address, group_items, now)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _write_xlsx_sheet(ws, name: str, address: str, items: list, now: datetime):
+    issue_date = now.strftime("%Y年%-m月%-d日")
+
+    # 列幅
+    col_widths = [14, 14, 14, 14, 12, 12, 12, 12, 14, 14]
+    for i, w in enumerate(col_widths, 1):
+        from openpyxl.utils import get_column_letter
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.row_dimensions[2].height = 40
+
+    # タイトル行
+    _mc(ws, "A2:J2", "請求書（立替金清算書）",
+        bold=True, size=16, h_align="center")
+
+    # 発行日
+    _mc(ws, "H4:J4", f"発行日　　{issue_date}", h_align="right")
+
+    # 宛先
+    _mc(ws, "A6:D6", "株式会社Vinyl Junkie Recordings", v_align="bottom")
+    ws["E6"].value = "御中"
+    ws["E6"].alignment = Alignment(vertical="bottom")
+    _apply_outer_border(ws, 6, 7, 1, 7)
+
+    # 氏名・住所ボックス
+    ws["H6"].value = "氏名"
+    ws["H6"].alignment = Alignment(horizontal="left", vertical="middle")
+    _mc(ws, "I6:J6", name, v_align="middle")
+    ws["H7"].value = "住所"
+    ws["H7"].alignment = Alignment(horizontal="left", vertical="middle")
+    _mc(ws, "I7:J7", address, v_align="middle", wrap=True)
+    _apply_outer_border(ws, 6, 7, 8, 10)
+
+    # テーブルヘッダ行
+    _mc(ws, "A10:D10", "内容",     bold=True, bg="333333", font_color="FFFFFF", h_align="center")
+    _mc(ws, "E10:F10", "税込金額", bold=True, bg="333333", font_color="FFFFFF", h_align="center")
+    _mc(ws, "G10:H10", "消費税　10％", bold=True, bg="333333", font_color="FFFFFF", h_align="center")
+    _mc(ws, "I10:J10", "備考",     bold=True, bg="333333", font_color="FFFFFF", h_align="center")
+
+    # データ行
+    total_amount = 0
+    total_tax = 0
+    invoice_notes = []
+
+    for i, item in enumerate(items):
+        row = 11 + i
+        amount = item.get("amount_total") or 0
+        tax = item.get("tax_amount") or round(amount * 10 / 110)
+        date_str = item.get("date") or ""
+        store = item.get("store_name") or ""
+        desc = item.get("description") or ""
+        invoice = item.get("invoice_number") or ""
+        content = f"{date_str}　{desc}".strip("　 ") if date_str else desc
+        if store and invoice:
+            invoice_notes.append(f"{store}（登録番号{invoice}）")
+
+        _mc(ws, f"A{row}:D{row}", content, wrap=True)
+        _mc(ws, f"E{row}:F{row}", amount, h_align="right", num_fmt="#,##0")
+        _mc(ws, f"G{row}:H{row}", tax,    h_align="right", num_fmt="#,##0")
+        _mc(ws, f"I{row}:J{row}", store,  wrap=True)
+
+        total_amount += amount
+        total_tax += tax
+
+    TOTAL_ROW = 16
+    NOTE_ROW = 19
+
+    # 合計行
+    _mc(ws, f"A{TOTAL_ROW}:D{TOTAL_ROW}", "合　計", bold=True, bg="F2F2F2", h_align="center")
+    _mc(ws, f"E{TOTAL_ROW}:F{TOTAL_ROW}", total_amount, bold=True, bg="F2F2F2", h_align="right", num_fmt="#,##0")
+    _mc(ws, f"G{TOTAL_ROW}:H{TOTAL_ROW}", total_tax,    bold=True, bg="F2F2F2", h_align="right", num_fmt="#,##0")
+    _mc(ws, f"I{TOTAL_ROW}:J{TOTAL_ROW}", "", bg="F2F2F2")
+
+    # テーブル全体に罫線
+    _apply_outer_border(ws, 10, TOTAL_ROW, 1, 10)
+
+    # インボイス注記
+    invoice_notes = list(dict.fromkeys(invoice_notes))
+    note_text = (
+        "、".join(invoice_notes) + "への支払額として"
+        if invoice_notes
+        else "○○株式会社（登録番号T××××）への支払額として"
+    )
+    _mc(ws, f"E{NOTE_ROW}:J{NOTE_ROW}", note_text, italic=True, size=9)
