@@ -6,7 +6,7 @@ import google.generativeai as genai
 
 def _get_model():
     genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-    return genai.GenerativeModel("gemini-2.5-flash")
+    return genai.GenerativeModel("gemini-1.5-flash")
 
 
 PROMPT = """このPDFまたは画像に含まれる全ての領収書・レシートの情報を抽出して、
