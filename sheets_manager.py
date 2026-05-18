@@ -97,11 +97,15 @@ def upload_to_drive(xlsx_bytes: bytes, filename: str, folder_name: str) -> str:
 
 
 def _get_owner_email() -> str:
+    email = ""
     try:
         import streamlit as st
-        return str(st.secrets.get("owner_email", ""))
+        email = str(st.secrets.get("owner_email", ""))
     except Exception:
-        return os.environ.get("OWNER_EMAIL", "")
+        pass
+    if not email:
+        email = os.environ.get("OWNER_EMAIL", "")
+    return email
 
 
 def cleanup_service_account_drive() -> tuple[int, int]:
