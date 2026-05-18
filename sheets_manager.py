@@ -57,16 +57,24 @@ def _share_anyone(drive, file_id: str):
     ).execute()
 
 
+def _share_with_user(drive, file_id: str, email: str):
+    drive.permissions().create(
+        fileId=file_id,
+        body={"type": "user", "role": "writer", "emailAddress": email},
+        sendNotificationEmail=False,
+    ).execute()
+
+
 def upload_to_drive(xlsx_bytes: bytes, filename: str, folder_name: str) -> str:
     """XLSXをDriveフォルダにアップロードしてフォルダURLを返す。"""
     from googleapiclient.http import MediaIoBaseUpload
 
     drive = _get_drive()
+    owner_email = _get_owner_email()
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     fn = folder_name.strip() or f"経費精算_{ts}"
 
     folder_id = _create_folder(drive, fn)
-    _share_anyone(drive, folder_id)
 
     media = MediaIoBaseUpload(
         io.BytesIO(xlsx_bytes),
@@ -77,15 +85,13 @@ def upload_to_drive(xlsx_bytes: bytes, filename: str, folder_name: str) -> str:
         media_body=media,
         fields="id",
     ).execute()
-    _share_anyone(drive, file["id"])
 
-    owner_email = _get_owner_email()
+    # オーナーメールに直接共有 → 「共有アイテム」に表示される
     if owner_email:
         for fid in [folder_id, file["id"]]:
-            try:
-                _transfer_ownership(drive, fid, owner_email)
-            except Exception:
-                pass
+            _share_with_user(drive, fid, owner_email)
+    else:
+        _share_anyone(drive, folder_id)
 
     return f"https://drive.google.com/drive/folders/{folder_id}"
 

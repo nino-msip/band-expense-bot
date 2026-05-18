@@ -8,7 +8,7 @@ from sheets_manager import create_expense_report, cleanup_service_account_drive,
 
 load_dotenv(dotenv_path=".env")
 
-VERSION = "1.1"
+VERSION = "1.2"
 
 st.set_page_config(
     page_title="バンド経費精算",
