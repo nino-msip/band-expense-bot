@@ -8,6 +8,8 @@ from sheets_manager import create_expense_report, cleanup_service_account_drive,
 
 load_dotenv(dotenv_path=".env")
 
+VERSION = "1.0"
+
 st.set_page_config(
     page_title="バンド経費精算",
     page_icon="🎸",
@@ -72,6 +74,7 @@ def confirm_reset():
 
 
 # ── ヘッダー ──────────────────────────────────────────────
+st.caption(f"v{VERSION}")
 st.title("🎸 バンド経費精算")
 st.caption("レシート・領収書の写真またはPDFをアップロードして精算書を自動作成します")
 
