@@ -431,9 +431,6 @@ def _format_sheet(ws, num_items: int, total_row: int, note_row: int):
 # XLSX生成（テンプレートベース）
 # ────────────────────────────────────────────────────────────
 
-_TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "立替金精算書　原本.xlsx")
-
-
 def _unique_title(title: str, existing: list) -> str:
     if title not in existing:
         return title
@@ -445,58 +442,157 @@ def _unique_title(title: str, existing: list) -> str:
 
 
 def create_expense_xlsx(name: str, address: str, items: list) -> bytes:
-    from openpyxl import load_workbook as _load
-    import warnings
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        wb = _load(_TEMPLATE_PATH)
+    from openpyxl import Workbook as _WB
+    wb = _WB()
+    wb.remove(wb.active)
 
     now = datetime.now()
     issue_date = now.strftime("%Y年%-m月%-d日")
-    original = wb["原本"]
     created_titles: list[str] = []
 
-    for item in items:
-        store = (item.get("store_name") or item.get("description") or "明細").strip()
+    for i, item in enumerate(items):
+        store = (item.get("store_name") or item.get("description") or f"明細{i+1}").strip()
         title = _unique_title(store[:31], created_titles)
         created_titles.append(title)
-        ws = wb.copy_worksheet(original)
-        ws.title = title
-        _fill_template_sheet(ws, name, address, item, issue_date)
-
-    for sheet_name in ["書き出しの概要", "原本 書き方", "原本"]:
-        if sheet_name in wb.sheetnames:
-            del wb[sheet_name]
+        ws = wb.create_sheet(title=title)
+        _write_item_sheet(ws, name, address, item, issue_date)
 
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
 
 
-def _fill_template_sheet(ws, name: str, address: str, item: dict, issue_date: str):
+def _write_item_sheet(ws, name: str, address: str, item: dict, issue_date: str):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, Border, Side
+
+    # ── 列幅（Numbers原本に準拠）──
+    widths = {"A": 7.7, "B": 8.5, "C": 8.5, "D": 8.5,
+              "E": 10, "F": 10, "G": 10, "H": 8,
+              "I": 8.9, "J": 17.7}
+    for col, w in widths.items():
+        ws.column_dimensions[col].width = w
+
+    # ── 行高 ──
+    heights = {1: 18, 2: 24, 3: 24, 4: 18, 5: 18,
+               6: 18, 7: 18, 8: 18, 9: 19,
+               10: 18, 11: 19, 12: 18, 13: 18,
+               14: 18, 15: 18, 16: 18, 17: 18, 18: 18}
+    for r, h in heights.items():
+        ws.row_dimensions[r].height = h
+
+    # ── 罫線ヘルパー ──
+    def thin():
+        s = Side(style="thin", color="BFBFBF")
+        return Border(left=s, right=s, top=s, bottom=s)
+
+    def blk(left=False, right=False, top=False, bottom=False):
+        med = Side(style="medium", color="000000")
+        gray = Side(style="thin", color="BFBFBF")
+        return Border(
+            left=med if left else gray,
+            right=med if right else gray,
+            top=med if top else gray,
+            bottom=med if bottom else gray,
+        )
+
+    # 全セルに薄い罫線（Numbers テーブルグリッド再現）
+    for r in range(1, 19):
+        for c in range(1, 11):
+            ws.cell(r, c).border = thin()
+
+    # ── タイトル ──
+    ws.merge_cells("A2:J2")
+    c = ws["A2"]
+    c.value = "請求書（立替金清算書）"
+    c.font = Font(size=14)
+    c.alignment = Alignment(horizontal="center", vertical="center")
+
+    # ── 発行日 ──
+    ws["H4"].value = f"発行日　　{issue_date}"
+    ws["H4"].alignment = Alignment(horizontal="left", vertical="center")
+
+    # ── 宛先・氏名・住所 ──
+    ws.merge_cells("A6:D6")
+    ws["A6"].value = "株式会社Vinyl Junkie Recordings"
+    ws["A6"].alignment = Alignment(horizontal="left", vertical="center")
+    ws["E6"].value = "御中"
+    ws["E6"].alignment = Alignment(horizontal="left", vertical="center")
+
+    ws["H6"].value = "氏名"
+    ws["H6"].alignment = Alignment(horizontal="left", vertical="center")
+    ws.merge_cells("I6:J6")
+    ws["I6"].value = name
+    ws["I6"].alignment = Alignment(horizontal="left", vertical="center")
+
+    ws["H7"].value = "住所"
+    ws["H7"].alignment = Alignment(horizontal="left", vertical="center")
+    ws.merge_cells("I7:J8")
+    ws["I7"].value = address
+    ws["I7"].alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+
+    # ── テーブルヘッダ行（row10）──
+    ws.merge_cells("A10:D10")
+    ws["A10"].value = "内容"
+    ws["A10"].alignment = Alignment(horizontal="center", vertical="center")
+
+    ws.merge_cells("E10:F10")
+    ws["E10"].value = "税込金額"
+    ws["E10"].alignment = Alignment(horizontal="center", vertical="center")
+
+    ws.merge_cells("G10:H10")
+    ws["G10"].value = "消費税　10%"
+    ws["G10"].alignment = Alignment(horizontal="center", vertical="center")
+
+    ws.merge_cells("I10:J10")
+    ws["I10"].value = "備考"
+    ws["I10"].alignment = Alignment(horizontal="center", vertical="center")
+
+    # ── データ行（row11）──
     amount = item.get("amount_total") or 0
     tax = item.get("tax_amount") or round(amount * 10 / 110)
     date_str = item.get("date") or ""
     desc = item.get("description") or ""
-    store = item.get("store_name") or ""
+    store_name = item.get("store_name") or ""
     invoice = item.get("invoice_number") or ""
-
     content = f"{date_str}　{desc}".strip("　 ") if date_str else desc
 
-    ws["H4"] = f"発行日　　{issue_date}"
-    ws["I6"] = name
-    ws["I7"] = address  # テンプレートでI7:J8が結合済み
+    ws.merge_cells("A11:D11")
+    ws["A11"].value = content
+    ws["A11"].alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
-    ws["A11"] = content
-    ws["E11"] = amount
+    ws.merge_cells("E11:F11")
+    ws["E11"].value = amount
     ws["E11"].number_format = "#,##0"
-    ws["G11"] = tax
-    ws["G11"].number_format = "#,##0"
-    ws["I11"] = store
+    ws["E11"].alignment = Alignment(horizontal="right", vertical="center")
 
-    if invoice and store:
-        ws["E13"] = f"{store}（登録番号{invoice}）への支払額として"
+    ws.merge_cells("G11:H11")
+    ws["G11"].value = tax
+    ws["G11"].number_format = "#,##0"
+    ws["G11"].alignment = Alignment(horizontal="right", vertical="center")
+
+    ws.merge_cells("I11:J11")
+    ws["I11"].value = store_name
+    ws["I11"].alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+    # テーブル部分（rows 10-11）に黒の外枠 + 内側thin
+    for r in range(10, 12):
+        for c in range(1, 11):
+            ws.cell(r, c).border = blk(
+                left=(c == 1),
+                right=(c == 10),
+                top=(r == 10),
+                bottom=(r == 11),
+            )
+
+    # ── インボイス注記（row13）──
+    if invoice and store_name:
+        note = f"{store_name}（登録番号{invoice}）への支払額として"
     elif invoice:
-        ws["E13"] = f"（登録番号{invoice}）への支払額として"
+        note = f"（登録番号{invoice}）への支払額として"
     else:
-        ws["E13"] = "○○株式会社（登録番号T××××）への支払額として"
+        note = "○○株式会社（登録番号T××××）への支払額として"
+
+    ws.merge_cells("E13:J13")
+    ws["E13"].value = note
+    ws["E13"].alignment = Alignment(horizontal="left", vertical="center")
