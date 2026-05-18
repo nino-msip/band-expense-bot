@@ -1,7 +1,7 @@
 import os
 import json
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -56,9 +56,57 @@ def _share_anyone(drive, file_id: str):
     ).execute()
 
 
+def _get_owner_email() -> str:
+    try:
+        import streamlit as st
+        return str(st.secrets.get("owner_email", ""))
+    except Exception:
+        return os.environ.get("OWNER_EMAIL", "")
+
+
+def cleanup_service_account_drive() -> tuple[int, int]:
+    """サービスアカウントのDriveにある古いファイルをすべて削除する。(削除数, 合計数) を返す。"""
+    drive = _get_drive()
+    files = []
+    page_token = None
+    while True:
+        kwargs = dict(
+            q="trashed = false",
+            fields="nextPageToken, files(id, name)",
+            pageSize=100,
+        )
+        if page_token:
+            kwargs["pageToken"] = page_token
+        result = drive.files().list(**kwargs).execute()
+        files.extend(result.get("files", []))
+        page_token = result.get("nextPageToken")
+        if not page_token:
+            break
+
+    deleted = 0
+    for f in files:
+        try:
+            drive.files().delete(fileId=f["id"]).execute()
+            deleted += 1
+        except Exception:
+            pass
+    return deleted, len(files)
+
+
+def _transfer_ownership(drive, file_id: str, owner_email: str):
+    if not owner_email:
+        return
+    drive.permissions().create(
+        fileId=file_id,
+        body={"type": "user", "role": "owner", "emailAddress": owner_email},
+        transferOwnership=True,
+    ).execute()
+
+
 def create_expense_report(name: str, address: str, items: list, folder_name: str = "") -> list:
     gc = _get_client()
     drive = _get_drive()
+    owner_email = _get_owner_email()
     now = datetime.now()
     ts = now.strftime("%Y%m%d_%H%M%S")
 
@@ -72,10 +120,12 @@ def create_expense_report(name: str, address: str, items: list, folder_name: str
     fn = folder_name.strip() or f"経費精算_{name}_{ts}"
     folder_id = _create_folder(drive, fn)
     _share_anyone(drive, folder_id)
+    _transfer_ownership(drive, folder_id, owner_email)
 
     # 依頼ごとに新規スプレッドシートを作成してフォルダへ移動
     spreadsheet = gc.create(f"経費精算書_{name}_{ts}")
     _move_to_folder(drive, spreadsheet.id, folder_id)
+    _transfer_ownership(drive, spreadsheet.id, owner_email)
 
     urls = []
     first = True

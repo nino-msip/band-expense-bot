@@ -4,7 +4,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from receipt_extractor import extract_receipt_info
-from sheets_manager import create_expense_report
+from sheets_manager import create_expense_report, cleanup_service_account_drive
 
 load_dotenv(dotenv_path=".env")
 
@@ -212,3 +212,15 @@ if st.session_state.sheet_urls:
 # ── 初期表示 ──────────────────────────────────────────────
 elif not st.session_state.expense_items:
     st.info("上のエリアからレシート・領収書をアップロードしてください。")
+
+# ── 管理：ストレージクリーンアップ ───────────────────────
+with st.sidebar:
+    st.divider()
+    st.caption("🛠️ 管理")
+    if st.button("🗑️ サービスアカウントのDriveを空にする", use_container_width=True):
+        with st.spinner("削除中..."):
+            try:
+                deleted, total = cleanup_service_account_drive()
+                st.success(f"✅ {deleted}/{total} 件を削除しました。再度アップロードをお試しください。")
+            except Exception as e:
+                st.error(f"❌ {e}")
