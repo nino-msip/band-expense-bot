@@ -70,28 +70,40 @@ def upload_to_drive(xlsx_bytes: bytes, filename: str, folder_name: str) -> str:
     from googleapiclient.http import MediaIoBaseUpload
 
     drive = _get_drive()
-    owner_email = _get_owner_email()
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     fn = folder_name.strip() or f"経費精算_{ts}"
+    parent_folder_id = _get_parent_folder_id()
 
-    folder_id = _create_folder(drive, fn)
+    # ユーザーのDriveフォルダ内にサブフォルダを作成
+    folder_body = {"name": fn, "mimeType": "application/vnd.google-apps.folder"}
+    if parent_folder_id:
+        folder_body["parents"] = [parent_folder_id]
+
+    folder = drive.files().create(
+        body=folder_body,
+        fields="id",
+        supportsAllDrives=True,
+    ).execute()
+    folder_id = folder["id"]
 
     media = MediaIoBaseUpload(
         io.BytesIO(xlsx_bytes),
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
-    file = drive.files().create(
+    drive.files().create(
         body={"name": filename, "parents": [folder_id]},
         media_body=media,
         fields="id",
+        supportsAllDrives=True,
     ).execute()
 
-    # オーナーメールに直接共有 → 「共有アイテム」に表示される
-    if owner_email:
-        for fid in [folder_id, file["id"]]:
-            _share_with_user(drive, fid, owner_email)
-    else:
-        _share_anyone(drive, folder_id)
+    # 親フォルダが未設定の場合のみ共有処理（フォールバック）
+    if not parent_folder_id:
+        owner_email = _get_owner_email()
+        if owner_email:
+            _share_with_user(drive, folder_id, owner_email)
+        else:
+            _share_anyone(drive, folder_id)
 
     return f"https://drive.google.com/drive/folders/{folder_id}"
 
@@ -106,6 +118,18 @@ def _get_owner_email() -> str:
     if not email:
         email = os.environ.get("OWNER_EMAIL", "")
     return email
+
+
+def _get_parent_folder_id() -> str:
+    folder_id = ""
+    try:
+        import streamlit as st
+        folder_id = str(st.secrets.get("drive_folder_id", ""))
+    except Exception:
+        pass
+    if not folder_id:
+        folder_id = os.environ.get("DRIVE_FOLDER_ID", "")
+    return folder_id
 
 
 def cleanup_service_account_drive() -> tuple[int, int]:
