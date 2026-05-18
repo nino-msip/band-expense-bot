@@ -8,7 +8,7 @@ from sheets_manager import create_expense_report, cleanup_service_account_drive,
 
 load_dotenv(dotenv_path=".env")
 
-VERSION = "1.2"
+VERSION = "1.3"
 
 st.set_page_config(
     page_title="バンド経費精算",
@@ -27,6 +27,8 @@ if "xlsx_filename" not in st.session_state:
     st.session_state.xlsx_filename = ""
 if "drive_url" not in st.session_state:
     st.session_state.drive_url = ""
+if "drive_error" not in st.session_state:
+    st.session_state.drive_error = ""
 
 
 # ── ダイアログ：精算書作成して終了 ────────────────────────
@@ -50,12 +52,15 @@ def confirm_create(name, address, folder_name):
                     st.session_state.xlsx_data = xlsx_bytes
                     st.session_state.xlsx_filename = f"{fn}.xlsx"
                     st.session_state.drive_url = ""
-                    # Driveにもアップロード（失敗してもダウンロードは使える）
+                    # Driveにもアップロード
                     try:
                         drive_url = upload_to_drive(xlsx_bytes, f"{fn}.xlsx", fn)
                         st.session_state.drive_url = drive_url
-                    except Exception:
-                        pass
+                    except Exception as drive_err:
+                        st.session_state.drive_url = ""
+                        st.session_state.drive_error = str(drive_err)
+                    else:
+                        st.session_state.drive_error = ""
                     st.session_state.expense_items = []
                     st.rerun()
                 except Exception as e:
@@ -234,6 +239,8 @@ if st.session_state.sheet_urls:
 # ── XLSXダウンロード表示 ──────────────────────────────────
 if st.session_state.xlsx_data:
     st.success("✅ 精算書が完成しました！")
+    if st.session_state.drive_error:
+        st.warning(f"⚠️ Drive保存エラー: {st.session_state.drive_error}")
     if st.session_state.drive_url:
         st.link_button(
             "📁 Driveフォルダを開く",
